@@ -1,8 +1,10 @@
-// src/components/AuthForm.jsx
 import React, { useState } from "react";
 import { Database, Eye, EyeOff } from "lucide-react";
-import { registerWithEmail, loginWithEmail } from "../services/firebase";
+import { registerWithEmail, loginWithEmail, resetPassword } from "../services/firebase";
 import LoadingOverlay from "./loadingOverlay";
+import FloatingHelpButton from "./FloatingHelpButton";
+import HelpModal from "./HelpModal";
+import { toLower, toUpper, toWordCase } from "../utils/textFormatters.js";
 
 export default function AuthForm({ setUser, setRole }) {
   const [isRegistering, setIsRegistering] = useState(false);
@@ -18,42 +20,44 @@ export default function AuthForm({ setUser, setRole }) {
   const [busy, setBusy] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [viewLoading, setViewLoading] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   const handleAuth = async (e) => {
     e.preventDefault();
     setBusy(true);
+    setViewLoading(true);
+
     try {
       if (isRegistering) {
-        // register via firebase helper
         const profile = await registerWithEmail({
-          email: formData.email,
+          email: toLower(formData.email),
           password: formData.password,
-          fullName: formData.fullName,
-          matricNumber: formData.matricNumber,
-          department: formData.department,
-          role: selectedRole === "student" ? "student" : "lecturer",
+          fullName: toWordCase(formData.fullName),
+          matricNumber: toUpper(formData.matricNumber),
+          department: toWordCase(formData.department),
+          role: selectedRole,
         });
-        setUser({ uid: profile.uid, ...profile });
-        setRole(profile.role);
+
+        alert("Registration successful. Check your email to verify.");
       } else {
-        // login
         const profile = await loginWithEmail({
-          email: formData.email,
+          email: toLower(formData.email),
           password: formData.password,
         });
+
         setUser({ uid: profile.uid, ...profile });
         setRole(profile.role);
       }
     } catch (err) {
-      console.error(err);
-      alert(err.message || "Authentication failed");
+      alert(err.message);
     } finally {
       setBusy(false);
+      setViewLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-slate-100 dark:bg-gray-900 flex items-center justify-center p-4">
       <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md">
         {viewLoading && <LoadingOverlay text="Authenticating User..." />}
         <div className="text-center mb-8">
@@ -74,8 +78,35 @@ export default function AuthForm({ setUser, setRole }) {
             onChange={(e) =>
               setFormData({ ...formData, email: e.target.value })
             }
+            onBlur={() =>
+              setFormData((prev) => ({
+                ...prev,
+                email: toLower(prev.email),
+              }))
+            }
           />
 
+          {!isRegistering && (
+            <a
+              type="button"
+              className="text-indigo-600"
+              onClick={async () => {
+                if (!formData.email) {
+                  alert("Enter your email first");
+                  return;
+                }
+
+                try {
+                  await resetPassword(formData.email);
+                  alert("Password reset link sent to your email.");
+                } catch (err) {
+                  alert(err.message);
+                }
+              }}
+            >
+              Forgot Password?
+            </a>
+          )}
           <div className="relative">
             <input
               type={showPassword ? "text" : "password"}
@@ -92,7 +123,7 @@ export default function AuthForm({ setUser, setRole }) {
             <button
               type="button"
               onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 cursor-pointer"
             >
               {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
             </button>
@@ -107,6 +138,12 @@ export default function AuthForm({ setUser, setRole }) {
                 value={formData.fullName}
                 onChange={(e) =>
                   setFormData({ ...formData, fullName: e.target.value })
+                }
+                onBlur={() =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    fullName: toWordCase(prev.fullName),
+                  }))
                 }
               />
               <div className="grid grid-cols-2 gap-4">
@@ -143,6 +180,12 @@ export default function AuthForm({ setUser, setRole }) {
                     onChange={(e) =>
                       setFormData({ ...formData, matricNumber: e.target.value })
                     }
+                    onBlur={() =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        matricNumber: toUpper(prev.matricNumber),
+                      }))
+                    }
                   />
                   <input
                     className="w-full p-2 border rounded border-gray-500/20 focus:outline-offset-2 focus:outline-indigo-600"
@@ -150,6 +193,12 @@ export default function AuthForm({ setUser, setRole }) {
                     value={formData.department}
                     onChange={(e) =>
                       setFormData({ ...formData, department: e.target.value })
+                    }
+                    onBlur={() =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        department: toWordCase(prev.department),
+                      }))
                     }
                   />
                 </div>
@@ -187,6 +236,8 @@ export default function AuthForm({ setUser, setRole }) {
             : "Need an account? Register"}
         </button>
       </div>
+      <FloatingHelpButton open={helpOpen} setOpen={setHelpOpen} />
+      <HelpModal open={helpOpen} setOpen={setHelpOpen} />
     </div>
   );
 }

@@ -67,8 +67,8 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-100 font-sans">
       {viewLoading && <LoadingOverlay text="Logging Out..." />}
-      <nav className="bg-white px-4 py-4 flex justify-between items-center shadow-sm sticky top-0 z-50">
-        <div className="flex items-center gap-2 font-bold text-slate-800">
+      <nav className="bg-white dark:bg-gray-900 px-4 py-4 flex justify-between items-center shadow-sm sticky top-0 z-50">
+        <div className="flex items-center gap-2 font-bold text-slate-800 dark:text-slate-100">
           <Database className="text-indigo-600 w-5 h-5" /> AttendanceSQL
         </div>
         <button

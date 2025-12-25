@@ -3,9 +3,9 @@ import React, { useEffect, useState } from "react";
 import PdfService from "../services/pdf";
 import { getTodayDate } from "../utils/helpers";
 import { withMinDelay } from "../utils/withMinDelay";
-import { ClipboardMinus, Plus, Download, Loader2 } from "lucide-react";
+import { ClipboardMinus, Plus, Download, Loader2, Trash2 } from "lucide-react";
 import LoadingOverlay from "./loadingOverlay";
-
+import { toUpper, toWordCase } from "../utils/textFormatters.js";
 import {
   createCourseFirestore,
   fetchAllCourses,
@@ -57,8 +57,8 @@ export default function LecturerDashboard({ user }) {
     try {
       const newCourseDoc = await withMinDelay(
         createCourseFirestore({
-          code: newCourse.code,
-          name: newCourse.name,
+          code: toUpper(newCourse.code),
+          name: toWordCase(newCourse.name),
           lecturerId: user.uid,
           lecturerName: user.fullName,
         }),
@@ -131,10 +131,16 @@ export default function LecturerDashboard({ user }) {
           <p className="text-xs opacity-75">SQL Mode</p>
         </div>
         <button
-          onClick={() => setView("create")}
+          onClick={() =>
+            setView((prev) => (prev === "create" ? "list" : "create"))
+          }
           className="bg-white/20 active:bg-white/30 p-2 rounded-full"
         >
-          <Plus size={20} className="cursor-pointer" />
+          {view === "create" ? (
+            <Trash2 size={20} className="cursor-pointer" />
+          ) : (
+            <Plus size={20} className="cursor-pointer" />
+          )}
         </button>
       </div>
 
@@ -145,14 +151,14 @@ export default function LecturerDashboard({ user }) {
             className="bg-white p-6 rounded-xl shadow space-y-4"
           >
             <input
-              placeholder="Code (CS101)"
+              placeholder="Course Code"
               className="border p-2 w-full rounded-lg border-gray-500/20 focus:outline-offset-2 focus:outline-purple-600"
               onChange={(e) =>
                 setNewCourse({ ...newCourse, code: e.target.value })
               }
             />
             <input
-              placeholder="Name"
+              placeholder="Course Title"
               className="border p-2 w-full rounded-lg border-gray-500/20 focus:outline-offset-2 focus:outline-purple-600"
               onChange={(e) =>
                 setNewCourse({ ...newCourse, name: e.target.value })

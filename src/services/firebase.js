@@ -3,8 +3,11 @@ import { initializeApp } from "firebase/app";
 import {
   getAuth,
   createUserWithEmailAndPassword,
+  deleteUser,
   signInWithEmailAndPassword,
-  onAuthStateChanged
+  onAuthStateChanged,
+  sendPasswordResetEmail,
+  sendEmailVerification,
 } from "firebase/auth";
 
 // import {
@@ -26,6 +29,7 @@ import {
   getDocs,
   setDoc,
   updateDoc,
+  writeBatch,
   doc,
   query,
   where,
@@ -61,22 +65,73 @@ try {
 
 // create user in Auth and also create profile doc in 'users' collection
 export async function registerWithEmail({ email, password, fullName, matricNumber, department, role }) {
-  const credential = await createUserWithEmailAndPassword(auth, email, password);
-  const uid = credential.user.uid;
-  const userDoc = {
-    fullName,
-    matricNumber: matricNumber || "",
-    department: department || "",
-    role: role || "student",
-    email
-  };
-  await setDoc(doc(db, "users", uid), userDoc);
-  return { uid, ...userDoc };
+  const isStudent = role === "student";
+  const cleanMatric = matricNumber ? matricNumber.trim().toUpperCase() : null;
+
+  // 1. PRE-CHECK: Only for students
+  if (isStudent && cleanMatric) {
+    const indexCheckRef = doc(db, "matricIndex", cleanMatric);
+    const indexDoc = await getDoc(indexCheckRef);
+
+    if (indexDoc.exists()) {
+      throw new Error("This matric number is already registered.");
+    }
+  }
+
+  // 2. Create Auth User
+  const credential = await createUserWithEmailAndPassword(auth, email.toLowerCase(), password);
+
+  try {
+    const uid = credential.user.uid;
+    const batch = writeBatch(db);
+
+    // User Profile
+    const userRef = doc(db, "users", uid);
+    const userDoc = {
+      fullName,
+      matricNumber: cleanMatric || "",
+      department: department || "",
+      role: role || "student",
+      email
+    };
+    batch.set(userRef, userDoc);
+
+    // 3. Only create the Index Document for students
+    if (isStudent && cleanMatric) {
+      const indexRef = doc(db, "matricIndex", cleanMatric);
+      batch.set(indexRef, { uid: uid });
+    }
+
+    await batch.commit();
+    await sendEmailVerification(credential.user);
+    // return { uid, ...userDoc };
+
+    return {
+      success: true,
+      message: "Registration successful. Please verify your email."
+    };
+
+  } catch (error) {
+    // Cleanup if the write fails
+    await deleteUser(credential.user);
+    if (error.code === 'permission-denied') {
+      throw new Error("Registration failed: Matric number already in use.");
+    }
+    throw error;
+  }
 }
 
 // sign in and return profile doc
 export async function loginWithEmail({ email, password }) {
-  const cred = await signInWithEmailAndPassword(auth, email, password);
+  const cred = await signInWithEmailAndPassword(auth, email.toLowerCase(), password);
+
+  if (!cred.user.emailVerified) {
+    await sendEmailVerification(cred.user);
+    throw new Error(
+      "Email not verified. We have sent you a verification link."
+    );
+  }
+
   const uid = cred.user.uid;
   const snap = await getDoc(doc(db, "users", uid));
   if (!snap.exists()) {
@@ -84,6 +139,10 @@ export async function loginWithEmail({ email, password }) {
     return { uid, email };
   }
   return { uid, ...snap.data() };
+}
+
+export async function resetPassword(email) {
+  await sendPasswordResetEmail(auth, email.toLowerCase());
 }
 
 // get user profile by uid

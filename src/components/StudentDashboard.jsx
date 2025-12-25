@@ -1,6 +1,6 @@
 // src/components/StudentDashboard.jsx
 import React, { useEffect, useState, useRef } from "react";
-import { QrCode, BookOpen, CheckCircle, History } from "lucide-react";
+import { QrCode, BookOpen, CheckCircle, Loader2, History } from "lucide-react";
 import {
   fetchAllCourses,
   fetchEnrollmentsByStudent,
@@ -14,6 +14,7 @@ export default function StudentDashboard({ user }) {
   const [profile, setProfile] = useState({});
   const [courses, setCourses] = useState([]);
   const [myCourses, setMyCourses] = useState([]);
+  const [loadingCourseId, setLoadingCourseId] = useState(null);
   const [history, setHistory] = useState([]);
   const qrRef = useRef(null);
 
@@ -57,6 +58,10 @@ export default function StudentDashboard({ user }) {
   }, [activeTab, user.uid, profile.fullName, profile.matricNumber]);
 
   const enroll = async (course) => {
+    if (!user || !course) return;
+
+    setLoadingCourseId(course.id);
+
     try {
       await enrollStudentFirestore({
         studentId: user.uid,
@@ -65,9 +70,12 @@ export default function StudentDashboard({ user }) {
         courseId: course.id,
         courseName: course.name,
       });
+
       setMyCourses((prev) => [...prev, course.id]);
     } catch (err) {
       alert(err.message || "Could not enroll");
+    } finally {
+      setLoadingCourseId(null);
     }
   };
 
@@ -100,7 +108,7 @@ export default function StudentDashboard({ user }) {
         )}
 
         {activeTab === "courses" && (
-          <div className="space-y-3">
+          <div className="space-y-3 w-full sm:max-w-2xl mx-auto">
             {courses.map((c) => {
               const isEnrolled = myCourses.includes(c.id);
               return (
@@ -113,15 +121,25 @@ export default function StudentDashboard({ user }) {
                     <p className="text-sm">{c.name}</p>
                   </div>
                   <button
-                    onClick={() => !isEnrolled && enroll(c)}
-                    disabled={isEnrolled}
-                    className={`px-4 py-2 rounded text-sm ${
-                      isEnrolled
-                        ? "bg-green-100 text-green-700"
-                        : "bg-indigo-600 text-white"
-                    }`}
+                    onClick={() => enroll(c)}
+                    disabled={isEnrolled || loadingCourseId === c.id}
+                    className={`px-4 py-2 rounded text-sm flex items-center gap-2 justify-center
+                              ${
+                                isEnrolled
+                                  ? "bg-green-100 text-green-700 cursor-not-allowed"
+                                  : "bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer"
+                              }
+                            `}
                   >
-                    {isEnrolled ? "Enrolled" : "Join"}
+                    {loadingCourseId === c.id && (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    )}
+
+                    {loadingCourseId === c.id
+                      ? "Enrolling..."
+                      : isEnrolled
+                      ? "Enrolled"
+                      : "Join"}
                   </button>
                 </div>
               );
@@ -152,7 +170,7 @@ export default function StudentDashboard({ user }) {
         )}
       </div>
 
-      <div className="fixed bottom-0 w-full bg-white border border-gray-600/20 flex justify-around p-3 z-10">
+      <div className="fixed bottom-0 w-full bg-white dark:bg-gray-900 border border-gray-600/20 flex justify-around p-3 z-10">
         <button
           onClick={() => setActiveTab("courses")}
           className={`flex flex-col items-center cursor-pointer ${
