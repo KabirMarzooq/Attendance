@@ -18,6 +18,7 @@ import {
   deactivateCourseFirestore,
   countEnrollmentsByCourse,
 } from "../services/courseService";
+import toast from "react-hot-toast";
 
 export default function LecturerDashboard({ user }) {
   const [view, setView] = useState("list");
@@ -50,8 +51,26 @@ export default function LecturerDashboard({ user }) {
     document.body.appendChild(s);
   }, [user.uid, view]);
 
+  const validate = () => {
+    const { code, name } = newCourse;
+
+    // Common required fields
+    if (!code || !name ) {
+      return "Fields cannot be empty.";
+    }
+
+    return null; // valid
+  };
+
   const createCourse = async (e) => {
     e.preventDefault();
+
+    const error = validate();
+    if (error) {
+      toast.error(error);
+      return;
+    }
+
     setActionLoading(true);
 
     try {
@@ -65,7 +84,7 @@ export default function LecturerDashboard({ user }) {
         700
       );
 
-      // 🔥 OPTIMISTIC UPDATE
+      // REAL TIME UPDATE
       setCourses((prev) => [newCourseDoc, ...prev]);
 
       setView("list");
@@ -89,12 +108,12 @@ export default function LecturerDashboard({ user }) {
           false
         );
         scanner.render((text) => handleScan(text), console.warn);
-      } else alert("Scanner not ready");
+      } else toast.error("Scanner not ready");
     }, 400);
   };
 
   const handleScan = async (scanned) => {
-    // scanned is the JSON string we created earlier in StudentDashboard
+    // scanned is the JSON string created earlier in StudentDashboard
     if (!selectedCourse) return alert("Select course");
     let data;
     try {

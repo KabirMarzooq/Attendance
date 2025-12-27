@@ -51,6 +51,8 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 
+const RESTRICT_TO_ENGINEERING = true;
+
 // Try enabling offline persistence (IndexedDB). If it fails, fail silently.
 try {
   enableIndexedDbPersistence(db).catch((err) => {
@@ -68,13 +70,25 @@ export async function registerWithEmail({ email, password, fullName, matricNumbe
   const isStudent = role === "student";
   const cleanMatric = matricNumber ? matricNumber.trim().toUpperCase() : null;
 
+  // 🔒 TEMPORARY ENGINEERING RESTRICTION
+  if (
+    RESTRICT_TO_ENGINEERING &&
+    isStudent &&
+    cleanMatric &&
+    !cleanMatric.startsWith("ENG")
+  ) {
+    throw new Error(
+      "Registration is currently restricted to Engineering students only."
+    );
+  }
+
   // 1. PRE-CHECK: Only for students
   if (isStudent && cleanMatric) {
     const indexCheckRef = doc(db, "matricIndex", cleanMatric);
     const indexDoc = await getDoc(indexCheckRef);
 
     if (indexDoc.exists()) {
-      throw new Error("This matric number is already registered.");
+      throw new Error("Invalid matric number. Please confirm");
     }
   }
 

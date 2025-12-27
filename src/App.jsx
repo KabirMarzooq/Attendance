@@ -1,4 +1,5 @@
 // src/App.jsx
+// imports 
 import React, { useEffect, useState } from "react";
 import PdfService from "./services/pdf";
 import AuthForm from "./components/AuthForm";
@@ -11,7 +12,8 @@ import { signOut } from "firebase/auth";
 import { auth } from "./services/firebase";
 
 export default function App() {
-  const [user, setUser] = useState(null); // will hold { uid, fullName, ... }
+  // contstants
+  const [user, setUser] = useState(null);
   const [role, setRole] = useState(null);
   const [loading, setLoading] = useState(true);
   const [viewLoading, setViewLoading] = useState(false);
@@ -20,7 +22,7 @@ export default function App() {
   useEffect(() => {
     const init = async () => {
       await PdfService.init();
-      // QR lib (keep)
+      // QR lib 
       await new Promise((resolve) => {
         const s = document.createElement("script");
         s.src =

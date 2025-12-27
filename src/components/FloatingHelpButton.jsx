@@ -1,10 +1,11 @@
+// imports 
 import { motion } from "framer-motion";
 import { HelpCircle } from "lucide-react";
 import { useState } from "react";
 
 export default function FloatingHelpButton({ open, setOpen }) {
   const locked = open;
-  const [paused, setPaused] = useState(false);
+  const [paused, setPaused] = useState(false); // handle mouseOver
 
   return (
     <div className="fixed bottom-1 right-3 z-20 flex flex-col items-center">

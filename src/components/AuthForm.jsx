@@ -1,12 +1,20 @@
+// imports 
 import React, { useState } from "react";
 import { Database, Eye, EyeOff } from "lucide-react";
-import { registerWithEmail, loginWithEmail, resetPassword } from "../services/firebase";
+import {
+  registerWithEmail,
+  loginWithEmail,
+  resetPassword,
+} from "../services/firebase";
 import LoadingOverlay from "./loadingOverlay";
 import FloatingHelpButton from "./FloatingHelpButton";
 import HelpModal from "./HelpModal";
 import { toLower, toUpper, toWordCase } from "../utils/textFormatters.js";
+import toast from "react-hot-toast";
+import { getFirebaseErrorMessage } from "../utils/firebaseErrors";
 
 export default function AuthForm({ setUser, setRole }) {
+  // constants 
   const [isRegistering, setIsRegistering] = useState(false);
   const [formData, setFormData] = useState({
     fullName: "",
@@ -22,8 +30,43 @@ export default function AuthForm({ setUser, setRole }) {
   const [viewLoading, setViewLoading] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
 
+  // input fields validation to prevent blank inputs
+  const validateForm = () => {
+    const { email, password, fullName, matricNumber, department } = formData;
+
+    // Login validation
+    if (!isRegistering) {
+      if (!email || !password) {
+        return "All fields are required.";
+      }
+      return null;
+    }
+
+    // Common required fields
+    if (!email || !password || !fullName) {
+      return "All fields are required.";
+    }
+
+    // Student-specific validation
+    if (selectedRole === "student") {
+      if (!matricNumber || !department) {
+        return "Matric number and department are required.";
+      }
+    }
+
+    return null; // valid
+  };
+
+  // Handling User authentication
   const handleAuth = async (e) => {
     e.preventDefault();
+
+    const error = validateForm();
+    if (error) {
+      toast.error(error); 
+      return;
+    }
+
     setBusy(true);
     setViewLoading(true);
 
@@ -33,23 +76,29 @@ export default function AuthForm({ setUser, setRole }) {
           email: toLower(formData.email),
           password: formData.password,
           fullName: toWordCase(formData.fullName),
-          matricNumber: toUpper(formData.matricNumber),
-          department: toWordCase(formData.department),
+          matricNumber:
+            selectedRole === "student" ? toUpper(formData.matricNumber) : "",
+          department:
+            selectedRole === "student" ? toWordCase(formData.department) : "",
           role: selectedRole,
         });
 
-        alert("Registration successful. Check your email to verify.");
+        toast.success(
+          "Registration successful. Check your email to verify your account."
+        );
       } else {
         const profile = await loginWithEmail({
           email: toLower(formData.email),
           password: formData.password,
         });
 
+        toast.success("Login successful. Welcome back!");
         setUser({ uid: profile.uid, ...profile });
         setRole(profile.role);
       }
     } catch (err) {
-      alert(err.message);
+      const message = getFirebaseErrorMessage(err);
+      toast.error(message);
     } finally {
       setBusy(false);
       setViewLoading(false);
@@ -57,7 +106,7 @@ export default function AuthForm({ setUser, setRole }) {
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 dark:bg-gray-900 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-slate-100 dark:bg-gray-900 flex flex-col items-center justify-center p-4">
       <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md">
         {viewLoading && <LoadingOverlay text="Authenticating User..." />}
         <div className="text-center mb-8">
@@ -71,7 +120,6 @@ export default function AuthForm({ setUser, setRole }) {
         <form onSubmit={handleAuth} className="space-y-4 mt-4">
           <input
             type="email"
-            required
             className="w-full p-3 border rounded-lg border-gray-500/20 focus:outline-offset-2 focus:outline-indigo-600"
             placeholder="Enter Email"
             value={formData.email}
@@ -86,21 +134,22 @@ export default function AuthForm({ setUser, setRole }) {
             }
           />
 
+            {/* Password Reset  */}
           {!isRegistering && (
             <a
               type="button"
               className="text-indigo-600"
               onClick={async () => {
                 if (!formData.email) {
-                  alert("Enter your email first");
+                  toast.success("Enter your email first");
                   return;
                 }
 
                 try {
                   await resetPassword(formData.email);
-                  alert("Password reset link sent to your email.");
+                  toast.success("Password reset link sent to your email.");
                 } catch (err) {
-                  alert(err.message);
+                  toast.error(err.message);
                 }
               }}
             >
@@ -110,7 +159,6 @@ export default function AuthForm({ setUser, setRole }) {
           <div className="relative">
             <input
               type={showPassword ? "text" : "password"}
-              required
               minLength={8}
               className="w-full p-3 border rounded-lg border-gray-500/20 focus:outline-offset-2 focus:outline-indigo-600"
               placeholder="Enter Password"
@@ -120,6 +168,7 @@ export default function AuthForm({ setUser, setRole }) {
               }
             />
 
+              {/* hide/show password  */}
             <button
               type="button"
               onClick={() => setShowPassword(!showPassword)}
@@ -132,7 +181,6 @@ export default function AuthForm({ setUser, setRole }) {
             <div className="animate-fade-in space-y-4">
               <input
                 type="text"
-                required
                 className="w-full p-3 border rounded-lg border-gray-500/20 focus:outline-offset-2 focus:outline-indigo-600"
                 placeholder="Enter You Full Name"
                 value={formData.fullName}
@@ -146,6 +194,7 @@ export default function AuthForm({ setUser, setRole }) {
                   }))
                 }
               />
+              {/* role based selection */}
               <div className="grid grid-cols-2 gap-4">
                 <button
                   type="button"
@@ -170,7 +219,7 @@ export default function AuthForm({ setUser, setRole }) {
                   Lecturer
                 </button>
               </div>
-
+                  {/* if role === student */}
               {selectedRole === "student" && (
                 <div className="space-y-2 bg-slate-50 p-4 rounded-xl">
                   <input
@@ -236,8 +285,16 @@ export default function AuthForm({ setUser, setRole }) {
             : "Need an account? Register"}
         </button>
       </div>
+
+      {/* help modal  */}
       <FloatingHelpButton open={helpOpen} setOpen={setHelpOpen} />
       <HelpModal open={helpOpen} setOpen={setHelpOpen} />
+
+      {/* footer */}
+      <footer className="text-center text-sm text-gray-500 py-4">
+        © {new Date().getFullYear()} NUESA, Federal University Lokoja. All
+        rights reserved.
+      </footer>
     </div>
   );
 }

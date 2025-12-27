@@ -8,6 +8,7 @@ import {
   fetchAttendanceByStudent,
   fetchActiveCourses,
 } from "../services/firebase";
+import toast from "react-hot-toast";
 
 export default function StudentDashboard({ user }) {
   const [activeTab, setActiveTab] = useState("id");
@@ -73,7 +74,7 @@ export default function StudentDashboard({ user }) {
 
       setMyCourses((prev) => [...prev, course.id]);
     } catch (err) {
-      alert(err.message || "Could not enroll");
+      toast.error(err.message || "Could not enroll");
     } finally {
       setLoadingCourseId(null);
     }
