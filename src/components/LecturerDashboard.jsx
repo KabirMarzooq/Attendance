@@ -20,6 +20,29 @@ import {
 } from "../services/courseService";
 import toast from "react-hot-toast";
 
+/**
+ * ============================================================================
+ * CONFIGURATION: UNIVERSITY STRUCTURE
+ * Edit this object to add/remove Faculties and Departments
+ * ============================================================================
+ */
+const UNIVERSITY_DATA = {
+  "Engineering & Technology": [
+    "Computer Engineering",
+    "Electrical Engineering",
+    "Mechanical Engineering",
+    "Civil Engineering",
+  ],
+  Education: [
+    "Science Education",
+    "Arts Education",
+    "Educational Management",
+    "Guidance & Counseling",
+  ],
+  Science: ["Computer Science", "Microbiology", "Physics", "Mathematics"],
+  Arts: ["English", "History", "Philosophy"],
+};
+
 export default function LecturerDashboard({ user }) {
   const [view, setView] = useState("list");
   const [viewLoading, setViewLoading] = useState(false);
@@ -28,8 +51,10 @@ export default function LecturerDashboard({ user }) {
   const [selectedCourse, setSelectedCourse] = useState(null);
   const [scanResult, setScanResult] = useState(null);
   const [reportDate, setReportDate] = useState(getTodayDate());
+  const [loadingSummary, setLoadingSummary] = useState(false);
   const [newCourse, setNewCourse] = useState({ code: "", name: "" });
   const [enrollmentCounts, setEnrollmentCounts] = useState({});
+  const [selectedTargetDepts, setSelectedTargetDepts] = useState([]);
 
   useEffect(() => {
     (async () => {
@@ -46,16 +71,24 @@ export default function LecturerDashboard({ user }) {
     })();
 
     // load scanner script
-    const s = document.createElement("script");
-    s.src = "https://unpkg.com/html5-qrcode";
-    document.body.appendChild(s);
+    // const s = document.createElement("script");
+    // s.src = "https://unpkg.com/html5-qrcode";
+    // document.body.appendChild(s);
   }, [user.uid, view]);
+
+  const toggleDeptSelection = (dept) => {
+    if (selectedTargetDepts.includes(dept)) {
+      setSelectedTargetDepts(selectedTargetDepts.filter((d) => d !== dept));
+    } else {
+      setSelectedTargetDepts([...selectedTargetDepts, dept]);
+    }
+  };
 
   const validate = () => {
     const { code, name } = newCourse;
 
     // Common required fields
-    if (!code || !name ) {
+    if (!code || !name) {
       return "Fields cannot be empty.";
     }
 
@@ -71,6 +104,9 @@ export default function LecturerDashboard({ user }) {
       return;
     }
 
+    if (selectedTargetDepts.length === 0)
+      return toast.error("Please select at least one department.");
+
     setActionLoading(true);
 
     try {
@@ -80,13 +116,14 @@ export default function LecturerDashboard({ user }) {
           name: toWordCase(newCourse.name),
           lecturerId: user.uid,
           lecturerName: user.fullName,
+          targetDepartments: selectedTargetDepts,
         }),
         700
       );
 
       // REAL TIME UPDATE
       setCourses((prev) => [newCourseDoc, ...prev]);
-
+      setSelectedTargetDepts([]);
       setView("list");
     } finally {
       setActionLoading(false);
@@ -101,34 +138,74 @@ export default function LecturerDashboard({ user }) {
 
   const startScanner = () => {
     setTimeout(() => {
-      if (window.Html5QrcodeScanner) {
-        const scanner = new window.Html5QrcodeScanner(
-          "reader",
-          { fps: 10, qrbox: { width: 250, height: 250 } },
-          false
-        );
-        scanner.render((text) => handleScan(text), console.warn);
-      } else toast.error("Scanner not ready");
+      if (!window.Html5QrcodeScanner) {
+        const script = document.createElement("script");
+        script.src = "https://unpkg.com/html5-qrcode";
+        script.onload = () => toast.success("Scanner ready");
+        script.onerror = () => toast.error("Failed to load scanner library");
+        document.body.appendChild(script);
+        return;
+      }
+
+      navigator.mediaDevices
+        .getUserMedia({ video: true })
+        .then(() => {
+          const scanner = new window.Html5QrcodeScanner(
+            "reader",
+            {
+              fps: 15,
+              qrbox: { width: 300, height: 300 },
+              aspectRatio: 1.0,
+            },
+            false
+          );
+          scanner.render((text) => handleScan(text), console.warn);
+        })
+
+        .catch((err) => {
+          toast.error("Camera access denied. Please allow camera permissions.");
+          console.error(err);
+        });
     }, 400);
   };
 
   const handleScan = async (scanned) => {
-    // scanned is the JSON string created earlier in StudentDashboard
-    if (!selectedCourse) return alert("Select course");
+    if (!selectedCourse) return toast.error("Select a course first");
+
     let data;
     try {
       data = JSON.parse(scanned);
+      if (!data.uid || !data.fullName || !data.matricNumber) {
+        throw new Error("Missing required fields in QR code");
+      }
     } catch (e) {
-      return setScanResult({ error: "Invalid QR" });
+      return setScanResult({ error: e.message || "Invalid QR code" });
     }
+
     const { uid: studentId, fullName, matricNumber } = data;
-    // verify enrollment
-    const enrolled = await fetchEnrollmentsByCourse(selectedCourse.id);
+
+    let enrolled;
+    try {
+      enrolled = await fetchEnrollmentsByCourse(selectedCourse.id);
+    } catch (err) {
+      return setScanResult({ error: "Failed to verify enrollment" });
+    }
+
     const valid = (enrolled || []).find((e) => e.studentId === studentId);
-    if (!valid) return setScanResult({ error: "Student not enrolled" });
+    if (!valid)
+      return setScanResult({ error: "Student not enrolled in this course" });
 
     const today = getTodayDate();
     try {
+      const alreadyMarked = await checkAttendanceExists({
+        studentId,
+        courseId: selectedCourse.id,
+        date: today,
+      });
+      if (alreadyMarked) {
+        return setScanResult({ error: "Attendance already marked for today" });
+      }
+
       await markAttendanceFirestore({
         studentId,
         fullName,
@@ -137,6 +214,7 @@ export default function LecturerDashboard({ user }) {
         date: today,
       });
       setScanResult({ success: true, student: { studentName: fullName } });
+      toast.success(`Attendance marked for ${fullName}`);
     } catch (err) {
       setScanResult({ error: err.message || "Error marking attendance" });
     }
@@ -144,7 +222,7 @@ export default function LecturerDashboard({ user }) {
 
   return (
     <div className="max-w-2xl mx-auto pb-20">
-      <div className="bg-purple-800 text-white p-6 flex justify-between items-center">
+      <div className="bg-purple-800 text-white p-6 flex justify-between items-center sticky top-0 shadow-sm z-10">
         <div>
           <h1 className="font-bold text-xl">Lecturer Portal</h1>
           <p className="text-xs opacity-75">SQL Mode</p>
@@ -153,13 +231,9 @@ export default function LecturerDashboard({ user }) {
           onClick={() =>
             setView((prev) => (prev === "create" ? "list" : "create"))
           }
-          className="bg-white/20 active:bg-white/30 p-2 rounded-full"
+          className="bg-white/20 active:bg-white/30 p-2 rounded-full cursor-pointer"
         >
-          {view === "create" ? (
-            <Trash2 size={20} className="cursor-pointer" />
-          ) : (
-            <Plus size={20} className="cursor-pointer" />
-          )}
+          {view === "create" ? <Trash2 size={20} /> : <Plus size={20} />}
         </button>
       </div>
 
@@ -169,6 +243,7 @@ export default function LecturerDashboard({ user }) {
             onSubmit={createCourse}
             className="bg-white p-6 rounded-xl shadow space-y-4"
           >
+            <h3 className="font-bold text-lg">Create New Course</h3>
             <input
               placeholder="Course Code"
               className="border p-2 w-full rounded-lg border-gray-500/20 focus:outline-offset-2 focus:outline-purple-600"
@@ -183,18 +258,51 @@ export default function LecturerDashboard({ user }) {
                 setNewCourse({ ...newCourse, name: e.target.value })
               }
             />
+            <div className="bg-slate-50 p-4 rounded-xl border border-gray-300">
+              <label className="block text-sm font-bold mb-2">
+                Target Departments
+              </label>
+              <div className="max-h-40 overflow-y-auto space-y-2">
+                {Object.keys(UNIVERSITY_DATA).map((fac) => (
+                  <div key={fac}>
+                    <h4 className="text-xs font-bold text-purple-600 uppercase mt-2 mb-1">
+                      {fac}
+                    </h4>
+                    {UNIVERSITY_DATA[fac].map((dept) => (
+                      <label
+                        key={dept}
+                        className="flex items-center gap-2 text-sm p-1 hover:bg-slate-100 rounded cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedTargetDepts.includes(dept)}
+                          onChange={() => toggleDeptSelection(dept)}
+                          className="w-4 h-4 text-purple-600 cursor-pointer accent-purple-600"
+                        />
+                        {dept}
+                      </label>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
             <button
               disabled={actionLoading}
               className="bg-purple-600 text-white w-full py-2 rounded-lg flex justify-center items-center gap-2 focus:outline-offset-2 focus:outline-purple-600 cursor-pointer hover:bg-purple-700"
             >
               {actionLoading && <Loader2 className="w-4 h-4 animate-spin" />}
-              {actionLoading ? "Creating..." : "Create"}
+              {actionLoading ? "Creating..." : "Create Course"}
             </button>
           </form>
         )}
 
         {view === "list" && (
           <div className="space-y-4">
+            {courses.length === 0 && (
+              <p className="text-center italic text-slate-400 py-10">
+                No courses created...
+              </p>
+            )}
             {courses.map((c) => (
               <div
                 key={c.id}
@@ -254,12 +362,14 @@ export default function LecturerDashboard({ user }) {
               <button
                 onClick={() => setView("scanner")}
                 className="bg-purple-600 text-white p-6 rounded-xl font-bold cursor-pointer hover:bg-purple-700 transition-all ease-in-out duration-200"
+                aria-label="Open Scanner"
               >
                 Scan
               </button>
               <button
                 onClick={() => setView("reports")}
                 className="bg-slate-100 p-6 rounded-xl font-bold border text-gray-600 border-gray-400 cursor-pointer hover:text-purple-600 hover:border-purple-600 transition-all ease-in-out duration-200"
+                aria-label="View Reports"
               >
                 Reports
               </button>
@@ -277,12 +387,22 @@ export default function LecturerDashboard({ user }) {
             </button>
             <div className="bg-black text-white p-4 rounded-xl mt-2 min-h-[300px]">
               <div id="reader"></div>
-              {!scanResult && (
+              {!scanResult ? (
                 <button
                   onClick={startScanner}
                   className="bg-purple-500 w-full py-2 rounded mt-20 cursor-pointer"
                 >
                   Start Camera
+                </button>
+              ) : (
+                <button
+                  onClick={() => {
+                    setScanResult(null); // Reset scan result
+                    startScanner(); // Restart scanner
+                  }}
+                  className="bg-purple-500 w-full py-2 rounded mt-4 cursor-pointer"
+                >
+                  Restart Scanner
                 </button>
               )}
               {scanResult && (
@@ -291,9 +411,17 @@ export default function LecturerDashboard({ user }) {
                     scanResult.success ? "bg-green-600" : "bg-red-600"
                   }`}
                 >
-                  {scanResult.success
-                    ? `Marked: ${scanResult.student.studentName}`
-                    : scanResult.error}
+                  {scanResult.success ? (
+                    <>
+                      <p>Attendance marked for:</p>
+                      <p className="font-bold">
+                        {scanResult.student.studentName}
+                      </p>
+                      <p>Matric Number: {scanResult.student.matricNumber}</p>
+                    </>
+                  ) : (
+                    scanResult.error
+                  )}
                 </div>
               )}
             </div>
@@ -315,17 +443,23 @@ export default function LecturerDashboard({ user }) {
                   type="date"
                   value={reportDate}
                   onChange={(e) => setReportDate(e.target.value)}
-                  className="border p-2 rounded flex-1"
+                  className="border border-gray-200 shadow-sm p-2 rounded-md flex-1 cursor-pointer"
                 />
                 <button
-                  onClick={() =>
+                  onClick={() => {
+                    if (!reportDate) {
+                      toast.error("Please select a date for the report.");
+                      return;
+                    }
                     PdfService.generateDailyReport(
                       selectedCourse,
                       reportDate,
                       user.fullName
-                    )
-                  }
+                    );
+                  }}
                   className="bg-purple-600 text-white p-2 rounded cursor-pointer"
+                  disabled={!reportDate}
+                  aria-label="Generate Daily Report"
                 >
                   <Download size={20} />
                 </button>
@@ -334,10 +468,23 @@ export default function LecturerDashboard({ user }) {
             <div className="bg-white p-4 rounded-xl shadow">
               <h3 className="font-bold mb-2">Full Summary</h3>
               <button
-                onClick={() => PdfService.generateSummary(selectedCourse)}
-                className="bg-slate-800 text-white w-full py-2 rounded cursor-pointer"
+                onClick={async () => {
+                  setLoadingSummary(true);
+                  try {
+                    await PdfService.generateSummary(selectedCourse);
+                    toast.success("Summary report downloaded.");
+                  } catch (error) {
+                    toast.error("Failed to generate summary report.");
+                  } finally {
+                    setLoadingSummary(false);
+                  }
+                }}
+                className={`bg-slate-800 text-white w-full py-2 rounded cursor-pointer hover:bg-slate-900 transition-all ease-in-out duration-300 ${
+                  loadingSummary ? "opacity-50 cursor-not-allowed" : ""
+                }`}
+                disabled={loadingSummary}
               >
-                Download PDF
+                {loadingSummary ? "Generating..." : "Download PDF"}
               </button>
             </div>
           </div>

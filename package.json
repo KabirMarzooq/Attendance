@@ -11,9 +11,13 @@
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.17",
+    "dom-to-image": "^2.6.0",
     "firebase": "^12.6.0",
     "framer-motion": "^12.23.26",
+    "jspdf": "^4.0.0",
+    "jspdf-autotable": "^5.0.7",
     "lucide-react": "^0.555.0",
+    "qrcode": "^1.5.4",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-hot-toast": "^2.6.0",

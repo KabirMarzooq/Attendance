@@ -9,17 +9,7 @@ import {
   sendPasswordResetEmail,
   sendEmailVerification,
 } from "firebase/auth";
-
-// import {
-//   collection,
-//   doc,
-//   addDoc,
-//   getDocs,
-//   query,
-//   where,
-//   orderBy,
-// } from "firebase/firestore";
-
+import { getStorage } from "firebase/storage";
 import {
   getFirestore,
   addDoc,
@@ -50,6 +40,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+export const storage = getStorage(app);
 
 const RESTRICT_TO_ENGINEERING = true;
 
@@ -66,7 +57,7 @@ try {
 /* -- Helpers used by app -- */
 
 // create user in Auth and also create profile doc in 'users' collection
-export async function registerWithEmail({ email, password, fullName, matricNumber, department, role }) {
+export async function registerWithEmail({ email, password, fullName, matricNumber, department, faculty, role }) {
   const isStudent = role === "student";
   const cleanMatric = matricNumber ? matricNumber.trim().toUpperCase() : null;
 
@@ -105,8 +96,10 @@ export async function registerWithEmail({ email, password, fullName, matricNumbe
       fullName,
       matricNumber: cleanMatric || "",
       department: department || "",
+      faculty: faculty || "",
       role: role || "student",
-      email
+      email,
+      level: "100",
     };
     batch.set(userRef, userDoc);
 
@@ -141,6 +134,8 @@ export async function loginWithEmail({ email, password }) {
 
   if (!cred.user.emailVerified) {
     await sendEmailVerification(cred.user);
+    // await signOut(auth);
+    // throw new Error("Please verify your email before logging in.");
     throw new Error(
       "Email not verified. We have sent you a verification link."
     );
@@ -188,10 +183,11 @@ export async function fetchAllCourses() {
   const snap = await getDocs(q);
   return snap.docs.map(d => ({ id: d.id, ...d.data() }));
 }
-export async function fetchActiveCourses() {
+export async function fetchActiveCourses(department) {
   const q = query(
     collection(db, "courses"),
-    where("active", "==", true),
+    where("active", "==", true,),
+    where("targetDepartments", "array-contains", department),
     orderBy("createdAt", "desc")
   );
   const snap = await getDocs(q);
@@ -205,7 +201,7 @@ export async function enrollStudentFirestore({ studentId, studentName, matricNum
   const results = await getDocs(q);
   if (!results.empty) throw new Error("Already enrolled");
   return addDoc(collection(db, "enrollments"), {
-    studentId, studentName, matricNumber, courseId, courseName, enrolledAt: new Date().toISOString()
+    studentId, studentName, matricNumber, courseId, courseName, enrolledAt: serverTimestamp(),
   });
 }
 export async function fetchEnrollmentsByStudent(studentId) {
@@ -220,13 +216,13 @@ export async function fetchEnrollmentsByCourse(courseId) {
 }
 
 // attendance
-export async function markAttendanceFirestore({ studentId, fullName, matricNumber, courseId, date }) {
+export async function markAttendanceFirestore({ studentId, fullName, matricNumber, courseId, date, department }) {
   // check duplicate
   const q = query(collection(db, "attendance"), where("studentId", "==", studentId), where("courseId", "==", courseId), where("date", "==", date));
   const exist = await getDocs(q);
   if (!exist.empty) throw new Error("Already marked");
   return addDoc(collection(db, "attendance"), {
-    studentId, fullName, matricNumber, courseId, date, status: "present", timestamp: new Date().toISOString()
+    studentId, fullName, matricNumber, courseId, department, date, status: "present", timestamp: serverTimestamp(),
   });
 }
 export async function fetchAttendanceByStudent(studentId) {
@@ -241,23 +237,54 @@ export async function fetchAttendanceByCourse(courseId) {
 }
 
 // summary helper (client-side): takes courseId -> returns attendance grouped by student & distinct dates
+// export async function fetchCourseSummaryFirestore(courseId) {
+//   const attendance = await fetchAttendanceByCourse(courseId);
+//   const enrollments = await fetchEnrollmentsByCourse(courseId);
+//   const sessionDates = Array.from(new Set(attendance.map(a => a.date))).sort();
+//   const totalClasses = sessionDates.length;
+//   const students = enrollments.map(e => {
+//     const attended = attendance.filter(a => a.studentId === e.studentId).length;
+//     const percentage = totalClasses ? Math.round((attended / totalClasses) * 100) : 0;
+//     return {
+//       studentId: e.studentId,
+//       studentName: e.studentName,
+//       matricNumber: e.matricNumber,
+//       attended,
+//       percentage
+//     };
+//   });
+//   return { courseId, totalClasses, sessionDates, students };
+// }
 export async function fetchCourseSummaryFirestore(courseId) {
   const attendance = await fetchAttendanceByCourse(courseId);
   const enrollments = await fetchEnrollmentsByCourse(courseId);
-  const sessionDates = Array.from(new Set(attendance.map(a => a.date))).sort();
-  const totalClasses = sessionDates.length;
-  const students = enrollments.map(e => {
-    const attended = attendance.filter(a => a.studentId === e.studentId).length;
+
+  // Group attendance by department
+  const groupedByDepartment = {};
+  enrollments.forEach((enrollment) => {
+    const { studentId, studentName, matricNumber, department } = enrollment;
+
+    // Initialize department group if it doesn't exist
+    if (!groupedByDepartment[department]) {
+      groupedByDepartment[department] = [];
+    }
+
+    // Calculate attendance for the student
+    const attended = attendance.filter((a) => a.studentId === studentId).length;
+    const totalClasses = Array.from(new Set(attendance.map((a) => a.date))).length;
     const percentage = totalClasses ? Math.round((attended / totalClasses) * 100) : 0;
-    return {
-      studentId: e.studentId,
-      studentName: e.studentName,
-      matricNumber: e.matricNumber,
+
+    // Add student to the department group
+    groupedByDepartment[department].push({
+      studentId,
+      studentName,
+      matricNumber,
       attended,
-      percentage
-    };
+      percentage,
+    });
   });
-  return { courseId, totalClasses, sessionDates, students };
+
+  return groupedByDepartment;
 }
 
 // export auth listener helper

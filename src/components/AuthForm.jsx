@@ -1,6 +1,6 @@
-// imports 
+// imports
 import React, { useState } from "react";
-import { Database, Eye, EyeOff } from "lucide-react";
+import { Database, Eye, EyeOff, ChevronDown } from "lucide-react";
 import {
   registerWithEmail,
   loginWithEmail,
@@ -13,8 +13,31 @@ import { toLower, toUpper, toWordCase } from "../utils/textFormatters.js";
 import toast from "react-hot-toast";
 import { getFirebaseErrorMessage } from "../utils/firebaseErrors";
 
+/**
+ * ============================================================================
+ * CONFIGURATION: UNIVERSITY STRUCTURE
+ * Edit this object to add/remove Faculties and Departments
+ * ============================================================================
+ */
+const UNIVERSITY_DATA = {
+  "Engineering & Technology": [
+    "Computer Engineering",
+    "Electrical Engineering",
+    "Mechanical Engineering",
+    "Civil Engineering",
+  ],
+  Education: [
+    "Science Education",
+    "Arts Education",
+    "Educational Management",
+    "Guidance & Counseling",
+  ],
+  Science: ["Computer Science", "Microbiology", "Physics", "Mathematics"],
+  Arts: ["English", "History", "Philosophy"],
+};
+
 export default function AuthForm({ setUser, setRole }) {
-  // constants 
+  // constants
   const [isRegistering, setIsRegistering] = useState(false);
   const [formData, setFormData] = useState({
     fullName: "",
@@ -25,6 +48,8 @@ export default function AuthForm({ setUser, setRole }) {
     department: "",
   });
   const [selectedRole, setSelectedRole] = useState("student");
+  const [selectedFaculty, setSelectedFaculty] = useState("");
+  const [selectedDept, setSelectedDept] = useState("");
   const [busy, setBusy] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [viewLoading, setViewLoading] = useState(false);
@@ -49,9 +74,13 @@ export default function AuthForm({ setUser, setRole }) {
 
     // Student-specific validation
     if (selectedRole === "student") {
-      if (!matricNumber || !department) {
-        return "Matric number and department are required.";
+      if (!matricNumber) {
+        return "Matric number is required.";
       }
+    }
+
+    if (selectedRole === "student" && (!selectedFaculty || !selectedDept)) {
+      return "Faculty and Department are required.";
     }
 
     return null; // valid
@@ -63,7 +92,7 @@ export default function AuthForm({ setUser, setRole }) {
 
     const error = validateForm();
     if (error) {
-      toast.error(error); 
+      toast.error(error);
       return;
     }
 
@@ -79,7 +108,9 @@ export default function AuthForm({ setUser, setRole }) {
           matricNumber:
             selectedRole === "student" ? toUpper(formData.matricNumber) : "",
           department:
-            selectedRole === "student" ? toWordCase(formData.department) : "",
+            selectedRole === "student" ? toWordCase(selectedDept) : "",
+          faculty:
+            selectedRole === "student" ? toWordCase(selectedFaculty) : "",
           role: selectedRole,
         });
 
@@ -134,7 +165,7 @@ export default function AuthForm({ setUser, setRole }) {
             }
           />
 
-            {/* Password Reset  */}
+          {/* Password Reset  */}
           {!isRegistering && (
             <a
               type="button"
@@ -168,7 +199,7 @@ export default function AuthForm({ setUser, setRole }) {
               }
             />
 
-              {/* hide/show password  */}
+            {/* hide/show password  */}
             <button
               type="button"
               onClick={() => setShowPassword(!showPassword)}
@@ -177,6 +208,11 @@ export default function AuthForm({ setUser, setRole }) {
               {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
             </button>
           </div>
+          {isRegistering && formData.password.length < 8 && (
+            <p className="text-xs text-gray-500 italic -mt-3">
+              Password Must Be at Least 8 Characters Long
+            </p>
+          )}
           {isRegistering && (
             <div className="animate-fade-in space-y-4">
               <input
@@ -219,11 +255,11 @@ export default function AuthForm({ setUser, setRole }) {
                   Lecturer
                 </button>
               </div>
-                  {/* if role === student */}
+              {/* if role === student */}
               {selectedRole === "student" && (
-                <div className="space-y-2 bg-slate-50 p-4 rounded-xl">
+                <div className="space-y-2 bg-slate-50 p-4 rounded-lg border border-slate-200">
                   <input
-                    className="w-full p-2 border rounded border-gray-500/20 focus:outline-offset-2 focus:outline-indigo-600"
+                    className="w-full p-2 border rounded bg-white border-gray-500/20 focus:outline-offset-2 focus:outline-indigo-600"
                     placeholder="Matric No"
                     value={formData.matricNumber}
                     onChange={(e) =>
@@ -236,20 +272,54 @@ export default function AuthForm({ setUser, setRole }) {
                       }))
                     }
                   />
-                  <input
-                    className="w-full p-2 border rounded border-gray-500/20 focus:outline-offset-2 focus:outline-indigo-600"
-                    placeholder="Department"
-                    value={formData.department}
-                    onChange={(e) =>
-                      setFormData({ ...formData, department: e.target.value })
-                    }
-                    onBlur={() =>
-                      setFormData((prev) => ({
-                        ...prev,
-                        department: toWordCase(prev.department),
-                      }))
-                    }
-                  />
+                  {/* Faculty Selection */}
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 uppercase">
+                      Faculty
+                    </label>
+                    <div className="relative">
+                      <select
+                        className="w-full p-2 border rounded appearance-none cursor-pointer bg-white border-gray-500/20 focus:outline-offset-2 focus:outline-indigo-600"
+                        value={selectedFaculty}
+                        onChange={(e) => {
+                          setSelectedFaculty(e.target.value);
+                          setSelectedDept("");
+                        }}
+                      >
+                        <option value="">-- Select Faculty --</option>
+                        {Object.keys(UNIVERSITY_DATA).map((fac) => (
+                          <option key={fac} value={fac}>
+                            {fac}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown className="absolute right-2 top-3 w-4 h-4 text-slate-400 pointer-events-none" />
+                    </div>
+                  </div>
+
+                  {/* Department Selection */}
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 uppercase">
+                      Department
+                    </label>
+                    <div className="relative">
+                      <select
+                        className="w-full p-2 border rounded appearance-none cursor-pointer bg-white border-gray-500/20 focus:outline-offset-2 focus:outline-indigo-600"
+                        value={selectedDept}
+                        onChange={(e) => setSelectedDept(e.target.value)}
+                        disabled={!selectedFaculty}
+                      >
+                        <option value="">-- Select Department --</option>
+                        {selectedFaculty &&
+                          UNIVERSITY_DATA[selectedFaculty].map((dept) => (
+                            <option key={dept} value={dept}>
+                              {dept}
+                            </option>
+                          ))}
+                      </select>
+                      <ChevronDown className="absolute right-2 top-3 w-4 h-4 text-slate-400 pointer-events-none" />
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
