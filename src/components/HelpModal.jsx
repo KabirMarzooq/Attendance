@@ -18,7 +18,7 @@ export default function HelpModal({ open, setOpen }) {
           <div className="space-y-3 text-sm text-slate-700">
             <p className="font-semibold">How to set up your account:</p>
             <ol className="list-decimal list-inside space-y-3">
-              <li>Register using your email and password.</li>
+              <li>Register with email and password.</li>
               <li>Select your role (Student or Lecturer).</li>
               <li>Fill in your details correctly.</li>
               <li>Login to access your dashboard.</li>

@@ -33,6 +33,8 @@ export default function StudentDashboard({ user }) {
   const [courses, setCourses] = useState([]);
   const [myCourses, setMyCourses] = useState([]);
   const [loadingCourseId, setLoadingCourseId] = useState(null);
+  const [historySearchTerm, setHistorySearchTerm] = useState("");
+  const [filteredHistory, setFilteredHistory] = useState([]);
   const [history, setHistory] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [filteredCourses, setFilteredCourses] = useState([]);
@@ -138,8 +140,6 @@ export default function StudentDashboard({ user }) {
           const imgData = reader.result;
 
           // Standard portrait ID card dimensions
-          // Credit card size is 85.60mm × 53.98mm
-          // For portrait, we use 85.60mm width × 127mm height (taller for more info)
           const cardWidth = 85.6;
           const cardHeight = 127;
 
@@ -186,6 +186,7 @@ export default function StudentDashboard({ user }) {
           setProfile({
             fullName: user.fullName || userData.fullName,
             matricNumber: user.matricNumber || userData.matricNumber,
+            faculty: user.faculty || userData.faculty,
             department: user.department || userData.department,
             level: userData.level || (user.role === "student" ? "100" : ""),
             profileImage: userData.profileImage || null,
@@ -201,6 +202,7 @@ export default function StudentDashboard({ user }) {
           setProfile({
             fullName: user.fullName,
             matricNumber: user.matricNumber,
+            faculty: user.faculty,
             department: user.department,
             level: user.role === "student" ? "100" : "",
             profileImage: null,
@@ -219,8 +221,10 @@ export default function StudentDashboard({ user }) {
     (async () => {
       try {
         const active = await fetchActiveCourses(user.department);
-        const filteredCourses = active.filter((course) =>
-          course.targetDepartments.includes(user.department)
+        const filteredCourses = active.filter(
+          (course) =>
+            course.targetDepartments.includes(user.department) &&
+            course.enrollmentOpen === true
         );
         setCourses(filteredCourses);
         setFilteredCourses(filteredCourses);
@@ -237,7 +241,6 @@ export default function StudentDashboard({ user }) {
     })();
   }, [user]);
 
-  // Handle search functionality
   useEffect(() => {
     if (!searchTerm.trim()) {
       setFilteredCourses(courses);
@@ -262,6 +265,41 @@ export default function StudentDashboard({ user }) {
   }, [searchTerm, courses]);
 
   useEffect(() => {
+    if (!history || history.length === 0) {
+      setFilteredHistory([]);
+      return;
+    }
+
+    // Sort by timestamp (most recent first)
+    const sortedHistory = [...history].sort((a, b) => {
+      const dateA = a.timestamp?.toDate
+        ? a.timestamp.toDate()
+        : new Date(a.timestamp || 0);
+      const dateB = b.timestamp?.toDate
+        ? b.timestamp.toDate()
+        : new Date(b.timestamp || 0);
+      return dateB - dateA; 
+    });
+
+    // Filter by search term
+    if (!historySearchTerm.trim()) {
+      setFilteredHistory(sortedHistory);
+      return;
+    }
+
+    const term = historySearchTerm.toLowerCase();
+    const matching = sortedHistory.filter((record) =>
+      record.courseCode?.toLowerCase().includes(term)
+    );
+
+    const nonMatching = sortedHistory.filter(
+      (record) => !record.courseCode?.toLowerCase().includes(term)
+    );
+
+    setFilteredHistory([...matching, ...nonMatching]);
+  }, [historySearchTerm, history]);
+
+  useEffect(() => {
     if (activeTab === "id") {
       setTimeout(() => {
         if (!qrRef.current) return;
@@ -277,6 +315,7 @@ export default function StudentDashboard({ user }) {
             uid: user.uid,
             fullName: profile.fullName,
             matricNumber: profile.matricNumber,
+            department: profile.department,
           }),
           { width: 160 },
           (err) => {
@@ -285,7 +324,13 @@ export default function StudentDashboard({ user }) {
         );
       }, 100);
     }
-  }, [activeTab, user.uid, profile.fullName, profile.matricNumber]);
+  }, [
+    activeTab,
+    user.uid,
+    profile.fullName,
+    profile.matricNumber,
+    profile.department,
+  ]);
 
   const enroll = async (course) => {
     if (!user || !course) return;
@@ -298,7 +343,7 @@ export default function StudentDashboard({ user }) {
         studentName: profile.fullName,
         matricNumber: profile.matricNumber,
         courseId: course.id,
-        courseName: course.name,
+        courseCode: course.code,
       });
 
       setMyCourses((prev) => [...prev, course.id]);
@@ -392,9 +437,10 @@ export default function StudentDashboard({ user }) {
                       letterSpacing: "0.05em",
                       fontSize: "14px",
                       margin: 0,
+                      lineHeight: "1.2",
                     }}
                   >
-                    University of Tech
+                    Faculty of {profile.faculty}
                   </h2>
                   <p
                     style={{
@@ -654,7 +700,14 @@ export default function StudentDashboard({ user }) {
             </div>
 
             {filteredCourses.length === 0 && (
-              <p className="text-slate-400 text-sm italic">No courses found.</p>
+              <div className="text-center py-10">
+                <p className="text-slate-400 text-sm italic">
+                  No courses available for enrollment.
+                </p>
+                <p className="text-slate-400 text-sm italic">
+                  No courses found.
+                </p>
+              </div>
             )}
 
             {filteredCourses.map((c) => {
@@ -778,29 +831,114 @@ export default function StudentDashboard({ user }) {
 
         {/* HISTORY TAB */}
         {activeTab === "history" && (
-          <div className="space-y-3">
-            {history.length === 0 && (
-              <p className="text-center text-slate-500 italic">
+          <div className="space-y-3 w-full sm:max-w-2xl mx-auto">
+            {/* Search Bar */}
+            <div className="bg-white p-2 rounded-lg border border-gray-200 flex items-center gap-2 sticky top-20 shadow-sm z-20 max-w-xl mx-auto">
+              <Search size={18} className="text-slate-400" />
+              <input
+                placeholder="Search course name..."
+                className="flex-1 outline-none text-sm"
+                value={historySearchTerm}
+                onChange={(e) => setHistorySearchTerm(e.target.value)}
+              />
+              {historySearchTerm && (
+                <button
+                  onClick={() => setHistorySearchTerm("")}
+                  className="text-slate-400 hover:text-slate-600 text-xs font-semibold px-2"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+
+            {/* Header */}
+            <div className="flex items-center gap-2 mb-2">
+              <History size={16} className="text-slate-500" />
+              <h3 className="font-bold text-slate-700">
+                {historySearchTerm
+                  ? `Showing results for "${historySearchTerm}"`
+                  : "Attendance History"}
+              </h3>
+            </div>
+
+            {filteredHistory.length === 0 && !historySearchTerm && (
+              <p className="text-center text-slate-500 italic py-10">
                 No attendance history available.
               </p>
             )}
-            {history.map((r) => (
-              <div
-                key={r.id}
-                className="bg-white p-4 rounded-xl border-l-4 border-green-500 flex justify-between"
-              >
-                <div>
-                  <h3 className="font-bold">{r.courseName}</h3>
-                  <p className="text-xs">
-                    {new Date(r.timestamp).toLocaleString()}
-                  </p>
+
+            {filteredHistory.length === 0 && historySearchTerm && (
+              <p className="text-center text-slate-400 italic py-10">
+                No matching attendance records found.
+              </p>
+            )}
+
+            {/* Attendance Records */}
+            {filteredHistory.map((r) => {
+              const isMatch =
+                historySearchTerm &&
+                r.courseCode
+                  ?.toLowerCase()
+                  .includes(historySearchTerm.toLowerCase());
+
+              // Format the date properly
+              let displayDate = "Date not available";
+              let displayTime = "";
+
+              try {
+                if (r.timestamp) {
+                  // Handle Firestore Timestamp
+                  const date = r.timestamp.toDate
+                    ? r.timestamp.toDate()
+                    : new Date(r.timestamp);
+                  displayDate = date.toLocaleDateString("en-US", {
+                    year: "numeric",
+                    month: "short",
+                    day: "numeric",
+                  });
+                  displayTime = date.toLocaleTimeString("en-US", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  });
+                } else if (r.date) {
+                  // Fallback to date field
+                  displayDate = r.date;
+                }
+              } catch (error) {
+                console.error("Error formatting date:", error);
+              }
+
+              return (
+                <div
+                  key={r.id}
+                  className={`bg-white p-4 rounded-xl border-l-4 border-green-500 transition-all ${
+                    isMatch ? "ring-2 ring-indigo-400 shadow-md" : "shadow-sm"
+                  }`}
+                >
+                  <div className="flex justify-between items-start">
+                    <div className="flex-1">
+                      <h3
+                        className={`font-bold ${
+                          isMatch ? "text-indigo-700" : ""
+                        }`}
+                      >
+                        {r.courseCode || "Unknown Course"}
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-1">
+                        {displayDate}
+                        {displayTime && (
+                          <span className="ml-2">• {displayTime}</span>
+                        )}
+                      </p>
+                    </div>
+                    <div className="flex items-center text-green-600 gap-1">
+                      <CheckCircle size={16} />
+                      <span className="text-xs font-bold">Present</span>
+                    </div>
+                  </div>
                 </div>
-                <div className="flex items-center text-green-600 gap-1">
-                  <CheckCircle size={14} />
-                  <span className="text-xs font-bold">Present</span>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

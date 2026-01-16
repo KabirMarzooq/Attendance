@@ -83,7 +83,7 @@ export default function AuthForm({ setUser, setRole }) {
       return "Faculty and Department are required.";
     }
 
-    return null; // valid
+    return null; 
   };
 
   // Handling User authentication

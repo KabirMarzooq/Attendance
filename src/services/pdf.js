@@ -5,24 +5,8 @@ import jsPDF from "jspdf";
 import "jspdf-autotable";
 
 const PdfService = {
-  // init: async () => {
-  //   // load jspdf and autotable
-  //   if (!window.jspdf) {
-  //     const s1 = document.createElement('script');
-  //     s1.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
-  //     document.head.appendChild(s1);
-  //     await new Promise(r => s1.onload = r);
-  //   }
-  //   if (!window.jspdfAutoTable) {
-  //     const s2 = document.createElement('script');
-  //     s2.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js";
-  //     document.head.appendChild(s2);
-  //     await new Promise(r => s2.onload = r);
-  //   }
-  // },
 
   generateDailyReport: async (course, date, lecturerName) => {
-    // if (!window.jspdf) { toast.error("PDF engine not ready"); return; }
     const attendance = await fetchAttendanceByCourse(course.id);
     const records = (attendance || []).filter(r => r.date === date);
     if (!records || records.length === 0) { toast.error("No records"); return; }
@@ -40,15 +24,47 @@ const PdfService = {
   },
 
   generateSummary: async (course) => {
-    // if (!window.jspdf) { toast.error("PDF engine not ready"); return; }
-    const summary = await fetchCourseSummaryFirestore(course.id);
-    const rows = (summary.students || []).map(s => [s.matricNumber, s.studentName, s.attended, `${s.percentage}%`]);
-    if (!rows.length) { toast.error("No classes recorded"); return; }
+    const summaryByDept = await fetchCourseSummaryFirestore(course.id);
+
+    // Flatten the grouped data into a single array
+    const allStudents = [];
+    Object.keys(summaryByDept).forEach(dept => {
+      summaryByDept[dept].forEach(student => {
+        allStudents.push(student);
+      });
+    });
+
+    if (!allStudents.length) {
+      toast.error("No enrollment or attendance records found");
+      return;
+    }
+
+    // Get attendance records to calculate total classes
+    const attendance = await fetchAttendanceByCourse(course.id);
+    const totalClasses = Array.from(new Set(attendance.map(a => a.date))).length;
+
     try {
       const doc = new jsPDF();
-      doc.setFontSize(18); doc.text(`${course.code} - Attendance Summary`, 14, 20);
-      doc.text(`Total Classes: ${summary.totalClasses}`, 14, 30);
-      doc.autoTable({ startY: 30, head: [['Matric No', 'Name', 'Classes Attended', 'Attendance %']], body: rows, styles: { fontSize: 10 }, pageBreak: 'auto', });
+      doc.setFontSize(18);
+      doc.text(`${course.code} - Attendance Summary`, 14, 20);
+      doc.setFontSize(12);
+      doc.text(`Total Classes: ${totalClasses}`, 14, 30);
+
+      const rows = allStudents.map(s => [
+        s.matricNumber,
+        s.studentName,
+        s.attended,
+        `${s.percentage}%`
+      ]);
+
+      doc.autoTable({
+        startY: 40,
+        head: [['Matric No', 'Name', 'Classes Attended', 'Attendance %']],
+        body: rows,
+        styles: { fontSize: 10 },
+        pageBreak: 'auto',
+      });
+
       doc.save(`${course.code}_Summary.pdf`);
     } catch (error) {
       toast.error("Failed to generate PDF. Please try again.");

@@ -1,7 +1,6 @@
 // src/App.jsx
 // imports 
 import React, { useEffect, useState } from "react";
-// import PdfService from "./services/pdf";
 import AuthForm from "./components/AuthForm";
 import StudentDashboard from "./components/StudentDashboard";
 import LecturerDashboard from "./components/LecturerDashboard";
@@ -21,15 +20,6 @@ export default function App() {
 
   useEffect(() => {
     const init = async () => {
-      // await PdfService.init();
-      // QR lib 
-      // await new Promise((resolve) => {
-      //   const s = document.createElement("script");
-      //   s.src =
-      //     "https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js";
-      //   s.onload = resolve;
-      //   document.head.appendChild(s);
-      // });
       setLoading(false);
     };
     init();

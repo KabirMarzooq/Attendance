@@ -44,10 +44,9 @@ export const storage = getStorage(app);
 
 const RESTRICT_TO_ENGINEERING = true;
 
-// Try enabling offline persistence (IndexedDB). If it fails, fail silently.
 try {
   enableIndexedDbPersistence(db).catch((err) => {
-    // multi-tab or browser not supported
+    
     console.warn("Firestore persistence not enabled:", err.message);
   });
 } catch (e) {
@@ -61,7 +60,7 @@ export async function registerWithEmail({ email, password, fullName, matricNumbe
   const isStudent = role === "student";
   const cleanMatric = matricNumber ? matricNumber.trim().toUpperCase() : null;
 
-  // 🔒 TEMPORARY ENGINEERING RESTRICTION
+  // TEMPORARY ENGINEERING RESTRICTION
   if (
     RESTRICT_TO_ENGINEERING &&
     isStudent &&
@@ -73,7 +72,7 @@ export async function registerWithEmail({ email, password, fullName, matricNumbe
     );
   }
 
-  // 1. PRE-CHECK: Only for students
+  // PRE-CHECK: Only for students
   if (isStudent && cleanMatric) {
     const indexCheckRef = doc(db, "matricIndex", cleanMatric);
     const indexDoc = await getDoc(indexCheckRef);
@@ -83,7 +82,7 @@ export async function registerWithEmail({ email, password, fullName, matricNumbe
     }
   }
 
-  // 2. Create Auth User
+  // Create Auth User
   const credential = await createUserWithEmailAndPassword(auth, email.toLowerCase(), password);
 
   try {
@@ -103,7 +102,7 @@ export async function registerWithEmail({ email, password, fullName, matricNumbe
     };
     batch.set(userRef, userDoc);
 
-    // 3. Only create the Index Document for students
+    // Only create the Index Document for students
     if (isStudent && cleanMatric) {
       const indexRef = doc(db, "matricIndex", cleanMatric);
       batch.set(indexRef, { uid: uid });
@@ -134,8 +133,6 @@ export async function loginWithEmail({ email, password }) {
 
   if (!cred.user.emailVerified) {
     await sendEmailVerification(cred.user);
-    // await signOut(auth);
-    // throw new Error("Please verify your email before logging in.");
     throw new Error(
       "Email not verified. We have sent you a verification link."
     );
@@ -144,7 +141,7 @@ export async function loginWithEmail({ email, password }) {
   const uid = cred.user.uid;
   const snap = await getDoc(doc(db, "users", uid));
   if (!snap.exists()) {
-    // profile missing — return minimal
+    
     return { uid, email };
   }
   return { uid, ...snap.data() };
@@ -165,6 +162,7 @@ export async function createCourseFirestore(course) {
   const ref = await addDoc(collection(db, "courses"), {
     ...course,
     active: true,
+    enrollmentOpen: true,
     createdAt: serverTimestamp(),
   });
 
@@ -172,13 +170,13 @@ export async function createCourseFirestore(course) {
     id: ref.id,
     ...course,
     active: true,
-    createdAt: new Date(), // local fallback
+    createdAt: new Date(), 
   };
 }
 export async function fetchAllCourses() {
   const q = query(
     collection(db, "courses"),
-    orderBy("createdAt", "desc") // newest first
+    orderBy("createdAt", "desc") 
   );
   const snap = await getDocs(q);
   return snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -193,15 +191,19 @@ export async function fetchActiveCourses(department) {
   const snap = await getDocs(q);
   return snap.docs.map(d => ({ id: d.id, ...d.data() }));
 }
+export async function toggleEnrollmentFirestore(courseId, newStatus) {
+  const courseRef = doc(db, "courses", courseId);
+  await updateDoc(courseRef, { enrollmentOpen: newStatus });
+}
 
-// enrollments
-export async function enrollStudentFirestore({ studentId, studentName, matricNumber, courseId, courseName }) {
-  // prevent duplicates client-side by querying
+// enrollments collection helpers
+export async function enrollStudentFirestore({ studentId, studentName, matricNumber, courseId, courseCode }) {
+  
   const q = query(collection(db, "enrollments"), where("studentId", "==", studentId), where("courseId", "==", courseId));
   const results = await getDocs(q);
   if (!results.empty) throw new Error("Already enrolled");
   return addDoc(collection(db, "enrollments"), {
-    studentId, studentName, matricNumber, courseId, courseName, enrolledAt: serverTimestamp(),
+    studentId, studentName, matricNumber, courseId, courseCode, enrolledAt: serverTimestamp(),
   });
 }
 export async function fetchEnrollmentsByStudent(studentId) {
@@ -215,15 +217,29 @@ export async function fetchEnrollmentsByCourse(courseId) {
   return snap.docs.map(d => ({ id: d.id, ...d.data() }));
 }
 
-// attendance
-export async function markAttendanceFirestore({ studentId, fullName, matricNumber, courseId, date, department }) {
+// attendance collection helpers
+export async function markAttendanceFirestore({ studentId, fullName, matricNumber, courseId, courseCode, date, department, lecturerId }) {
   // check duplicate
   const q = query(collection(db, "attendance"), where("studentId", "==", studentId), where("courseId", "==", courseId), where("date", "==", date));
   const exist = await getDocs(q);
   if (!exist.empty) throw new Error("Already marked");
-  return addDoc(collection(db, "attendance"), {
-    studentId, fullName, matricNumber, courseId, department, date, status: "present", timestamp: serverTimestamp(),
-  });
+  const attendanceData = {
+    studentId,
+    fullName,
+    matricNumber,
+    courseId,
+    courseCode,
+    lecturerId,
+    date,
+    status: "present",
+    timestamp: serverTimestamp(),
+  };
+
+  if (department) {
+    attendanceData.department = department;
+  }
+
+  return addDoc(collection(db, "attendance"), attendanceData);
 }
 export async function fetchAttendanceByStudent(studentId) {
   const q = query(collection(db, "attendance"), where("studentId", "==", studentId), orderBy("timestamp", "desc"));
@@ -236,25 +252,6 @@ export async function fetchAttendanceByCourse(courseId) {
   return snap.docs.map(d => ({ id: d.id, ...d.data() }));
 }
 
-// summary helper (client-side): takes courseId -> returns attendance grouped by student & distinct dates
-// export async function fetchCourseSummaryFirestore(courseId) {
-//   const attendance = await fetchAttendanceByCourse(courseId);
-//   const enrollments = await fetchEnrollmentsByCourse(courseId);
-//   const sessionDates = Array.from(new Set(attendance.map(a => a.date))).sort();
-//   const totalClasses = sessionDates.length;
-//   const students = enrollments.map(e => {
-//     const attended = attendance.filter(a => a.studentId === e.studentId).length;
-//     const percentage = totalClasses ? Math.round((attended / totalClasses) * 100) : 0;
-//     return {
-//       studentId: e.studentId,
-//       studentName: e.studentName,
-//       matricNumber: e.matricNumber,
-//       attended,
-//       percentage
-//     };
-//   });
-//   return { courseId, totalClasses, sessionDates, students };
-// }
 export async function fetchCourseSummaryFirestore(courseId) {
   const attendance = await fetchAttendanceByCourse(courseId);
   const enrollments = await fetchEnrollmentsByCourse(courseId);

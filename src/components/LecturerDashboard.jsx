@@ -12,6 +12,8 @@ import {
   fetchEnrollmentsByCourse,
   markAttendanceFirestore,
   fetchCourseSummaryFirestore,
+  toggleEnrollmentFirestore,
+  fetchAttendanceByCourse,
 } from "../services/firebase";
 
 import {
@@ -20,12 +22,6 @@ import {
 } from "../services/courseService";
 import toast from "react-hot-toast";
 
-/**
- * ============================================================================
- * CONFIGURATION: UNIVERSITY STRUCTURE
- * Edit this object to add/remove Faculties and Departments
- * ============================================================================
- */
 const UNIVERSITY_DATA = {
   "Engineering & Technology": [
     "Computer Engineering",
@@ -55,6 +51,7 @@ export default function LecturerDashboard({ user }) {
   const [newCourse, setNewCourse] = useState({ code: "", name: "" });
   const [enrollmentCounts, setEnrollmentCounts] = useState({});
   const [selectedTargetDepts, setSelectedTargetDepts] = useState([]);
+  const [scanner, setScanner] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -69,12 +66,18 @@ export default function LecturerDashboard({ user }) {
       setEnrollmentCounts(counts);
       setCourses(mine);
     })();
-
-    // load scanner script
-    // const s = document.createElement("script");
-    // s.src = "https://unpkg.com/html5-qrcode";
-    // document.body.appendChild(s);
   }, [user.uid, view]);
+
+  useEffect(() => {
+    return () => {
+      if (scanner) {
+        scanner
+          .clear()
+          .catch((err) => console.warn("Scanner cleanup error:", err));
+        setScanner(null);
+      }
+    };
+  }, [view, scanner]);
 
   const toggleDeptSelection = (dept) => {
     if (selectedTargetDepts.includes(dept)) {
@@ -86,13 +89,10 @@ export default function LecturerDashboard({ user }) {
 
   const validate = () => {
     const { code, name } = newCourse;
-
-    // Common required fields
     if (!code || !name) {
       return "Fields cannot be empty.";
     }
-
-    return null; // valid
+    return null;
   };
 
   const createCourse = async (e) => {
@@ -121,7 +121,6 @@ export default function LecturerDashboard({ user }) {
         700
       );
 
-      // REAL TIME UPDATE
       setCourses((prev) => [newCourseDoc, ...prev]);
       setSelectedTargetDepts([]);
       setView("list");
@@ -130,43 +129,174 @@ export default function LecturerDashboard({ user }) {
     }
   };
 
-  const sortedCourses = [...courses].sort(
-    (a, b) =>
-      (b.createdAt?.seconds || b.createdAt?.getTime?.() || 0) -
-      (a.createdAt?.seconds || a.createdAt?.getTime?.() || 0)
-  );
+  const toggleEnrollment = async (courseId, currentStatus) => {
+    try {
+      await toggleEnrollmentFirestore(courseId, !currentStatus);
+      setCourses((prev) =>
+        prev.map((c) =>
+          c.id === courseId ? { ...c, enrollmentOpen: !currentStatus } : c
+        )
+      );
+      toast.success(!currentStatus ? "Enrollment opened" : "Enrollment closed");
+    } catch (error) {
+      toast.error("Failed to toggle enrollment");
+    }
+  };
 
   const startScanner = () => {
+    // Clear any existing scanner first
+    if (scanner) {
+      scanner
+        .clear()
+        .catch((err) => console.warn("Scanner cleanup error:", err));
+      setScanner(null);
+    }
+
+    setScanResult(null);
+
     setTimeout(() => {
       if (!window.Html5QrcodeScanner) {
         const script = document.createElement("script");
         script.src = "https://unpkg.com/html5-qrcode";
-        script.onload = () => toast.success("Scanner ready");
+        script.onload = () => {
+          toast.success("Scanner ready");
+          initializeScanner();
+        };
         script.onerror = () => toast.error("Failed to load scanner library");
         document.body.appendChild(script);
         return;
       }
 
-      navigator.mediaDevices
-        .getUserMedia({ video: true })
-        .then(() => {
-          const scanner = new window.Html5QrcodeScanner(
-            "reader",
-            {
-              fps: 15,
-              qrbox: { width: 300, height: 300 },
-              aspectRatio: 1.0,
-            },
-            false
-          );
-          scanner.render((text) => handleScan(text), console.warn);
-        })
-
-        .catch((err) => {
-          toast.error("Camera access denied. Please allow camera permissions.");
-          console.error(err);
-        });
+      initializeScanner();
     }, 400);
+  };
+
+  const initializeScanner = () => {
+    navigator.permissions
+      ?.query({ name: "camera" })
+      .then((permissionStatus) => {
+        if (permissionStatus.state === "denied") {
+          setScanResult({
+            error:
+              "Camera access denied. Please enable camera in your browser settings and refresh the page.",
+          });
+          return;
+        }
+
+        navigator.mediaDevices
+          .getUserMedia({ video: { facingMode: "environment" } })
+          .then((stream) => {
+            stream.getTracks().forEach((track) => track.stop());
+
+            const newScanner = new window.Html5QrcodeScanner(
+              "reader",
+              {
+                fps: 10,
+                qrbox: { width: 250, height: 250 },
+                aspectRatio: 1.0,
+                rememberLastUsedCamera: true,
+              },
+              false
+            );
+
+            newScanner.render(
+              (decodedText) => {
+                newScanner
+                  .clear()
+                  .then(() => {
+                    setScanner(null);
+                    handleScan(decodedText);
+                  })
+                  .catch((err) => {
+                    console.warn("Scanner clear error:", err);
+                    handleScan(decodedText);
+                  });
+              },
+              (error) => {
+                if (!error.includes("No MultiFormat Readers")) {
+                  console.warn("Scan error:", error);
+                }
+              }
+            );
+
+            setScanner(newScanner);
+          })
+          .catch((err) => {
+            console.error("Camera error:", err);
+            if (
+              err.name === "NotAllowedError" ||
+              err.name === "PermissionDeniedError"
+            ) {
+              setScanResult({
+                error:
+                  "Camera permission denied. Please click 'Allow' when prompted and try again.",
+              });
+            } else if (err.name === "NotFoundError") {
+              setScanResult({
+                error: "No camera found on this device.",
+              });
+            } else if (err.name === "NotReadableError") {
+              setScanResult({
+                error:
+                  "Camera is being used by another app. Please close other apps and try again.",
+              });
+            } else {
+              setScanResult({
+                error:
+                  "Failed to access camera. Please check your browser settings.",
+              });
+            }
+          });
+      })
+      .catch(() => {
+        initializeScannerDirectly();
+      });
+  };
+
+  const initializeScannerDirectly = () => {
+    navigator.mediaDevices
+      .getUserMedia({ video: { facingMode: "environment" } })
+      .then((stream) => {
+        stream.getTracks().forEach((track) => track.stop());
+
+        const newScanner = new window.Html5QrcodeScanner(
+          "reader",
+          {
+            fps: 10,
+            qrbox: { width: 250, height: 250 },
+            aspectRatio: 1.0,
+          },
+          false
+        );
+
+        newScanner.render((decodedText) => {
+          newScanner
+            .clear()
+            .then(() => {
+              setScanner(null);
+              handleScan(decodedText);
+            })
+            .catch((err) => {
+              console.warn("Scanner clear error:", err);
+              handleScan(decodedText);
+            });
+        }, console.warn);
+
+        setScanner(newScanner);
+      })
+      .catch((err) => {
+        if (err.name === "NotReadableError") {
+          setScanResult({
+            error:
+              "Camera is busy. Please close other apps using the camera and try again.",
+          });
+        } else {
+          setScanResult({
+            error:
+              "Camera access denied. Please allow camera permissions and try again.",
+          });
+        }
+      });
   };
 
   const handleScan = async (scanned) => {
@@ -182,7 +312,7 @@ export default function LecturerDashboard({ user }) {
       return setScanResult({ error: e.message || "Invalid QR code" });
     }
 
-    const { uid: studentId, fullName, matricNumber } = data;
+    const { uid: studentId, fullName, matricNumber, department } = data;
 
     let enrolled;
     try {
@@ -197,11 +327,13 @@ export default function LecturerDashboard({ user }) {
 
     const today = getTodayDate();
     try {
-      const alreadyMarked = await checkAttendanceExists({
-        studentId,
-        courseId: selectedCourse.id,
-        date: today,
-      });
+      const attendanceRecords = await fetchAttendanceByCourse(
+        selectedCourse.id
+      );
+      const alreadyMarked = attendanceRecords.find(
+        (record) => record.studentId === studentId && record.date === today
+      );
+
       if (alreadyMarked) {
         return setScanResult({ error: "Attendance already marked for today" });
       }
@@ -210,10 +342,21 @@ export default function LecturerDashboard({ user }) {
         studentId,
         fullName,
         matricNumber,
+        department: department || "",
         courseId: selectedCourse.id,
+        courseCode: selectedCourse.code,
+        lecturerId: user.uid,
         date: today,
       });
-      setScanResult({ success: true, student: { studentName: fullName } });
+
+      setScanResult({
+        success: true,
+        student: {
+          studentName: fullName,
+          matricNumber: matricNumber,
+        },
+      });
+
       toast.success(`Attendance marked for ${fullName}`);
     } catch (err) {
       setScanResult({ error: err.message || "Error marking attendance" });
@@ -309,16 +452,14 @@ export default function LecturerDashboard({ user }) {
                 onClick={async () => {
                   setViewLoading(true);
                   setSelectedCourse(c);
-
-                  await new Promise((r) => setTimeout(r, 400)); // UX delay
-
+                  await new Promise((r) => setTimeout(r, 400));
                   setView("dashboard");
                   setViewLoading(false);
                 }}
-                className="bg-white p-5 cursor-pointer rounded-xl shadow border border-gray-800/20 text-gray-800 hover:border-purple-400 transition-all ease-in-out duration-300 flex justify-between items-center"
+                className="bg-white p-5 cursor-pointer rounded-xl shadow border border-gray-800/20 text-gray-800 hover:border-purple-400 transition-all ease-in-out duration-300 flex"
               >
                 {viewLoading && <LoadingOverlay text="Loading course..." />}
-                <div>
+                <div className="flex-1">
                   <h3 className="font-bold text-lg">
                     <span>{c.code}</span>
                     <span className="text-sm bg-purple-100 text-purple-700 p-1 ml-1 rounded-full">
@@ -326,27 +467,66 @@ export default function LecturerDashboard({ user }) {
                     </span>
                   </h3>
                   <p>{c.name}</p>
-                  {!c.active && (
-                    <p className="text-sm text-red-500 mt-1">Class Closed</p>
-                  )}
+                  <div className="flex gap-2 mt-2">
+                    {!c.active && (
+                      <p className="text-sm text-red-500">Class Closed</p>
+                    )}
+                    {c.active && c.enrollmentOpen && (
+                      <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">
+                        Enrollment Open
+                      </span>
+                    )}
+                    {c.active && !c.enrollmentOpen && (
+                      <span className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded-full">
+                        Enrollment Closed
+                      </span>
+                    )}
+                  </div>
                 </div>
 
-                {c.active && (
-                  <button
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      await deactivateCourseFirestore(c.id);
-                      setCourses((prev) =>
-                        prev.map((x) =>
-                          x.id === c.id ? { ...x, active: false } : x
-                        )
-                      );
-                    }}
-                    className="cursor-pointer"
-                  >
-                    <ClipboardMinus className="text-purple-800" />
-                  </button>
-                )}
+                <div className="flex gap-2 items-center">
+                  {c.active && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleEnrollment(c.id, c.enrollmentOpen);
+                      }}
+                      className="cursor-pointer py-1 px-2 hover:bg-purple-50 rounded-xl transition-all ease-in-out duration-200"
+                      title={
+                        c.enrollmentOpen
+                          ? "Close Enrollment"
+                          : "Open Enrollment"
+                      }
+                    >
+                      {c.enrollmentOpen ? (
+                        <span className="text-sm font-semibold text-orange-600">
+                          Close
+                        </span>
+                      ) : (
+                        <span className="text-sm font-semibold text-green-600">
+                          Open
+                        </span>
+                      )}
+                    </button>
+                  )}
+                  {c.active && (
+                    <button
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        await deactivateCourseFirestore(c.id);
+                        setCourses((prev) =>
+                          prev.map((x) =>
+                            x.id === c.id ? { ...x, active: false } : x
+                          )
+                        );
+                      }}
+                      className="cursor-pointer"
+                      title="Deactivate Course"
+                    >
+                      <ClipboardMinus className="text-purple-800" />
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -381,7 +561,18 @@ export default function LecturerDashboard({ user }) {
           <div>
             <button
               className="cursor-pointer"
-              onClick={() => setView("dashboard")}
+              onClick={() => {
+                if (scanner) {
+                  scanner
+                    .clear()
+                    .catch((err) =>
+                      console.warn("Scanner cleanup error:", err)
+                    );
+                  setScanner(null);
+                }
+                setScanResult(null);
+                setView("dashboard");
+              }}
             >
               &larr; Done
             </button>
@@ -397,8 +588,8 @@ export default function LecturerDashboard({ user }) {
               ) : (
                 <button
                   onClick={() => {
-                    setScanResult(null); // Reset scan result
-                    startScanner(); // Restart scanner
+                    setScanResult(null);
+                    startScanner();
                   }}
                   className="bg-purple-500 w-full py-2 rounded mt-4 cursor-pointer"
                 >
@@ -411,6 +602,7 @@ export default function LecturerDashboard({ user }) {
                     scanResult.success ? "bg-green-600" : "bg-red-600"
                   }`}
                 >
+                  {/* Removing this part later */}
                   {scanResult.success ? (
                     <>
                       <p>Attendance marked for:</p>
