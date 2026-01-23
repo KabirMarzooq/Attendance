@@ -169,7 +169,7 @@ export default function AuthForm({ setUser, setRole }) {
           {!isRegistering && (
             <a
               type="button"
-              className="text-indigo-600"
+              className="text-indigo-600 cursor-pointer"
               onClick={async () => {
                 if (!formData.email) {
                   toast.success("Enter your email first");
